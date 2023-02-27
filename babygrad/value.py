@@ -1,5 +1,9 @@
 import math
+import logging
+import warnings
 from numbers import Number
+
+logging.basicConfig(level=logging.INFO)
 
 class Value:
     operands: list['Value']
@@ -54,9 +58,27 @@ class Value:
     def _forward(self):
         return self.operands[0]
     
-    def backward(self, grad=1):
-        self.grad += grad
-        self._backward()
+    def backward(self):
+        self.grad = 1
+        # topo sort
+        seq = []
+        marked = set()
+        def topo_sort(v: Value):
+            if v in marked:
+                logging.info(f"Cycle detected in the computation graph of '{self}' at '{v}'")
+                return
+            marked.add(v)
+            for operand in v.operands:
+                if isinstance(operand, Value):
+                    topo_sort(operand)
+            seq.append(v)
+        topo_sort(self)
+        seq.reverse()
+        logging.info(f"Topological sort of the computation graph of '{self}': {seq}")
+        for v in seq:
+            v._backward()
+        
+        
     
     def _backward(self):
         pass
@@ -69,24 +91,24 @@ class Add(Value):
     def _forward(self):
         return self.operands[0].forward() + self.operands[1].forward()
     def _backward(self):
-        self.operands[0].backward(self.grad)
-        self.operands[1].backward(self.grad)
+        self.operands[0].grad += self.grad
+        self.operands[1].grad += self.grad
 
 class Mul(Value):
     symbol = "*"
     def _forward(self):
         return self.operands[0].forward() * self.operands[1].forward()
     def _backward(self):
-        self.operands[0].backward(self.grad * self.operands[1].value)
-        self.operands[1].backward(self.grad * self.operands[0].value)
+        self.operands[0].grad += self.grad * self.operands[1].value
+        self.operands[1].grad += self.grad * self.operands[0].value
 
 class Div(Value):
     symbol = "/"
     def _forward(self):
         return self.operands[0].forward() / self.operands[1].forward()
     def _backward(self):
-        self.operands[0].backward(self.grad / self.operands[1].value)
-        self.operands[1].backward(-(self.grad * self.operands[0].value)/(self.operands[1].value**2))
+        self.operands[0].grad += self.grad / self.operands[1].value
+        self.operands[1].grad += -(self.grad * self.operands[0].value)/(self.operands[1].value**2)
 
 class Pow(Value):
     symbol = "**"
@@ -99,16 +121,17 @@ class Pow(Value):
     def exp(self):
         return self.operands[1]
     def _backward(self):
-        self.base.backward(self.grad * self.exp.value * self.base.value**(self.exp.value-1))
+        self.base.grad += self.grad * self.exp.value * self.base.value**(self.exp.value-1)
         try:
-            self.exp.backward(self.grad * self.value * math.log(self.base.value))
+            self.exp.grad += self.grad * self.value * math.log(self.base.value)
         except ValueError:
-            raise RuntimeWarning(f"Logarithm of negative number {self.base.value} is not defined, therfore gradient of exponent is not defined. Try clipping the base to a positive value.")
+            warnings.warn(f"Logarithm of negative number {self.base.value} is not defined, therfore gradient of exponent is not defined. Try clipping the base to a positive value.")
+            
 
 class Sub(Value):
     symbol = "-"
     def _forward(self):
         return self.operands[0].forward() - self.operands[1].forward()
     def _backward(self):
-        self.operands[0].backward(self.grad)
-        self.operands[1].backward(-self.grad)
+        self.operands[0].grad += self.grad
+        self.operands[1].grad += -self.grad
