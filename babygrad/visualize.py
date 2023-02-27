@@ -5,7 +5,7 @@ def graph(net, globs = None):
     d = Digraph()
     label = lambda x, var_name: ('\n'.join(var_name) + ("\n" if var_name else "") + 
                                  f"{x.symbol}\n" + 
-                                 (f"Value: {x.value:.2f}" if x.value else "") + 
+                                 (f"Value: {x.value:.2f}" if x.value != None else "") + 
                                  f"\nGrad: {x.grad:.2f}")
     seen = set()
     globs = globs if globs else []
