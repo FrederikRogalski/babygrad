@@ -1,3 +1,9 @@
+# Babygrad
+A baby sized deep learning framework 👼🏻🔢
+
+## Usage
+
+```python
 from babygrad.value import Value
 from babygrad.visualize import graph
 
@@ -17,3 +23,7 @@ loss.forward()
 loss.backward()
 
 graph(loss, globs = globals()).render("out/test", view=True, format="png")
+```
+
+<!-- Outputs the following picture -->
+
