@@ -26,4 +26,4 @@ graph(loss, globs = globals()).render("out/test", view=True, format="png")
 ```
 
 <!-- Outputs the following picture -->
-
+![test](https://user-images.githubusercontent.com/31591562/221460160-0ac981d3-3786-43f9-9038-ab54532670a5.png)
