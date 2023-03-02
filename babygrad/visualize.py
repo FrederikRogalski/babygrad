@@ -1,27 +1,31 @@
 from graphviz import Digraph
-from babygrad.value import Value
+from babygrad.value import Value, Operand, Operator
 
 def graph(net, globs = None):
     d = Digraph()
-    label = lambda x, var_name: ('\n'.join(var_name) + ("\n" if var_name else "") + 
-                                 f"{x.symbol}\n" + 
-                                 (f"Value: {x.value:.2f}" if x.value != None else "") + 
-                                 f"\nGrad: {x.grad:.2f}")
     seen = set()
     globs = globs if globs else []
-    def rec_graph(net, d: Digraph):
-        # check if node is already in graph
+    def dfs(net: Operand, d: Digraph):
         if id(net) in seen:
             return
         seen.add(id(net))
         
-        var_name = [g for g in globs if globs[g]==net]
-        d.node(str(id(net)), label(net, var_name), shape="rectangle" if isinstance(net.operands[0], Value) else "ellipse")
+        var_names = [g for g in globs if globs[g]==net]
+        label = ",".join(var_names)+"\n" if var_names else ""
+        # add symbol to label
+        label += f"{net.symbol}\n"
+        # add value
+        label += f"{net.data}\n"
+        # add gradient if attr grad exists
+        label += f"grad: {net.grad}" if hasattr(net, "grad") else ""
+        d.node(str(id(net)), label, shape="ellipse" if isinstance(net, Value) else "rectangle")
+        if isinstance(net, Value):
+            return
+        net: Operator
         
-        for op in net.operands:
-            if not isinstance(op, Value):
-                return
-            d.edge(str(id(net)), str(id(op)))
-            rec_graph(op, d)
-    rec_graph(net, d)
+        for operand in net.operands:
+            d.edge(str(id(net)), str(id(operand)))
+            dfs(operand, d)
+    dfs(net, d)
     return d
+        

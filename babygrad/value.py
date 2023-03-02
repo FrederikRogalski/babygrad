@@ -1,34 +1,37 @@
-import math
-import warnings
-from babygrad import log
-from numbers import Number
+from babygrad.scalar import FloatData as Data
+from abc import ABC, abstractmethod
 
-
-
-class Value:
-    operands: list['Value']
-    symbol: str = 'v'
-    value: float
-    requires_grad_operands: list[bool]
-    def __init__(self, operands: list['Value'], requires_grad: bool = False):
-        self.operands = operands if isinstance(operands, list) else [operands]
-        self.value = None
-        self.grad = 0.0
+class Operand(ABC):
+    data: Data
+    symbol: str
+    def __init__(self, requires_grad = False):
         self.requires_grad = requires_grad
+        # Thisvariable will be set to either True or False for each forward pass depending on whether any of the operands require a gradient
+        # Therefore it indicates an indirect dependency on the gradient of a child node
+        self._decendant_requires_grad = None
+    
+    def item(self):
+        """Checks if self.data contains a single element and returns it."""
+        return self.data.item()
+    
+    def __repr__(self):
+        return f"{type(self).__name__}({self.data})"
+    
+    @abstractmethod
+    def __call__(self):
+        """Computes the whole computation graph and assigns self.data for each node."""
+        pass
     
     def _binary_op(self, operand, Op, swap=False):
         match operand:
-            case Value():
+            case Operand():
                 pass
-            case Number():
-                operand = Value(operand)
             case _:
-                raise TypeError(f"unsupported operand type(s) for {Op.symbol}: '{type(self).__name__}' and '{type(operand).__name__}'")
-        if swap:
-            return Op([operand, self])
-        return Op([self, operand])
-            
-    def __add__(self, addend: 'Value'):
+                operand = Value(data=operand)
+        return Op([operand, self]) if swap else Op([self, operand])
+    
+    # ****** Atomic operations ********
+    def __add__(self, addend):
         return self._binary_op(addend, Add)
     __radd__ = __add__
     def __mul__(self, multiplicant: 'Value'):
@@ -64,139 +67,138 @@ class Value:
         return self._binary_op(0, Maximum)
     def tanh(self):
         return 2.0 * ((2.0 * self).sigmoid()) - 1.0
+
+
+
+
+
+class Value(Operand):
+    symbol = "V"
+    def __init__(self, data: Data, requires_grad = False):
+        super().__init__(requires_grad=requires_grad)
+        self.data = data if isinstance(data, Data) else Data(data)
+    def __call__(self):
+        return self.data
+
+
+
+
+class Operator(Operand):
+    symbol = "O"
+    def __init__(self, operands: list[Operand], requires_grad = False):
+        super().__init__(requires_grad=requires_grad)
+        self.operands = operands
+        self.data = self._forward()
     
+    @classmethod
+    def _dfs(cls, current: Operand, visited: set[Operand], seq: list['Operator']):
+        if current in visited:
+            return
+        visited.add(current)
+        if isinstance(current, Operator):
+            for op in current.operands:
+                cls._dfs(op, visited, seq)
+            seq.append(current)
     
-    def __repr__(self):
-        # classname followed by operands
-        return f"{type(self).__name__}({self.operands})"
-    def __str__(self):
-        return f"{self.symbol}({', '.join([op.symbol for op in self.operands if isinstance(op, Value)])})"
+    def __call__(self):
+        """Forward pass of the computation graph."""
+        # create a topo sort of the computation graph
+        self._topo_sorted_graph: list[Operator] = []
+        self._dfs(self, set(), self._topo_sorted_graph)
+        
+        for operator in self._topo_sorted_graph:
+            self._op_requires_grad = []
+            for operand in operator.operands:
+                oprg = operand.requires_grad or operand._decendant_requires_grad
+                self._op_requires_grad.append(oprg)
+                if oprg:
+                    operand.grad = self.data.zero()
+            self._decendant_requires_grad = any(self._op_requires_grad)
+            operator.data = operator._forward()
     
-    def forward(self):
-        self.value = self._forward()
-        return self.value
-    
-    def _forward(self):
-        return self.operands[0]
+    @abstractmethod
+    def _forward(self) -> Data:
+        """Computes only this node of the computation graph."""
     
     def backward(self):
-        self.grad = 1
-        # topo sort        
-        seq: list[Value] = []
-        marked: dict[Value, bool] = {}
-        
-        def topo_sort(v: Value) -> bool:
-            if not isinstance(v, Value):
-                return False
-            if v in marked:
-                # return True if the node was marked as having descendants that require grad
-                log.debug(f"Found circle in computation graph of '{self}': '{v}' was already marked as {'requiring grad' if marked[v] else 'not requiring grad'}")
-                return marked[v]
-            v.requires_grad_operands: list[bool] = [topo_sort(op) for op in v.operands] 
-            descendents_require_grad = any(v.requires_grad_operands)
-            if descendents_require_grad:
-                seq.append(v)
-            marked[v] = descendents_require_grad or v.requires_grad
-            log.debug(f"Marked '{v}' as {'requiring grad' if marked[v] else 'not requiring grad'}")
-            return marked[v]
-        
-        topo_sort(self)
-        seq.reverse()
-        log.debug(f"Topological sort of the computation graph of '{self}': {seq}")
-        for v in seq:
-            v._backward()
-
-    def _backward(self):
-        pass
+        # Compute gradients in reverse topo sort order
+        for operator in reversed(self._topo_sorted_graph):
+            operand_gradients = operator._backward()
+            # Add the weighted gradients to the child nodes
+            for operand, operand_gradient in zip(operator.operands, operand_gradients):
+                if operand_gradient is None:
+                    continue
+                operand.grad += operand_gradient * self.grad
     
-    def zero_grad(self):
-        self.grad = 0.0
-        for op in self.operands:
-            if isinstance(op, Value):
-                op.zero_grad()
+    @abstractmethod
+    def _backward(self) -> list[Data | None]:
+        """Computes the gradients of this nodes operands if they are required."""
+        
 
+# ********* Atomic binary operations *************
 
-# ********* Subclasses of Value representing the different computations *************
-
-class Add(Value):
+class Add(Operator):
     symbol = "+"
     def _forward(self):
-        return self.operands[0].forward() + self.operands[1].forward()
+        return sum(op.data for op in self.operands)
     def _backward(self):
-        self.operands[0].grad += self.grad if self.requires_grad_operands[0] else 0
-        self.operands[1].grad += self.grad if self.requires_grad_operands[1] else 0
-
-class Mul(Value):
+        return  self.operands[0].data.one() if self._op_requires_grad[0] else None, \
+                self.operands[1].data.one() if self._op_requires_grad[1] else None
+class Sub(Operator):
+    symbol = "-"
+    def _forward(self):
+        return self.operands[0].data - sum(op.data for op in self.operands[1:])
+    def _backward(self):
+        return  self.operands[0].data.one() if self._op_requires_grad[0] else None, \
+                -self.operands[1].data.one() if self._op_requires_grad[1] else None
+class Mul(Operator):
     symbol = "*"
     def _forward(self):
-        return self.operands[0].forward() * self.operands[1].forward()
+        return self.operands[0].data * self.operands[1].data
     def _backward(self):
-        self.operands[0].grad += self.grad * self.operands[1].value if self.requires_grad_operands[0] else 0
-        self.operands[1].grad += self.grad * self.operands[0].value if self.requires_grad_operands[1] else 0
-
-class Div(Value):
+        return  self.operands[1].data if self._op_requires_grad[0] else None, \
+                self.operands[0].data if self._op_requires_grad[1] else None
+class Div(Operator):
     symbol = "/"
     def _forward(self):
-        return self.operands[0].forward() / self.operands[1].forward()
+        return self.operands[0].data / self.operands[1].data
     def _backward(self):
-        self.operands[0].grad += self.grad / self.operands[1].value if self.requires_grad_operands[0] else 0
-        self.operands[1].grad += -(self.grad * self.operands[0].value)/(self.operands[1].value**2) if self.requires_grad_operands[1] else 0
-
-class Pow(Value):
+        return  (1.0 / self.operands[1].data) if self._op_requires_grad[0] else None, \
+                -(self.operands[0].data / (self.operands[1].data ** 2)) if self._op_requires_grad[1] else None
+class Pow(Operator):
     symbol = "**"
     def _forward(self):
-        return self.base.forward() ** self.exp.forward()
-    @property
-    def base(self):
-        return self.operands[0]
-    @property
-    def exp(self):
-        return self.operands[1]
+        return self.operands[0].data ** self.operands[1].data
     def _backward(self):
-        self.base.grad += self.grad * self.exp.value * self.base.value**(self.exp.value-1) if self.requires_grad_operands[0] else 0
-        try:
-            self.exp.grad += self.grad * self.value * math.log(self.base.value) if self.requires_grad_operands[1] else 0
-        except ValueError:
-            warnings.warn(f"Logarithm of negative number {self.base.value} is not defined, therfore gradient of exponent is not defined. Try clipping the base to a positive value.")
-            
-
-class Sub(Value):
-    symbol = "-"
-    def _forward(self):
-        return self.operands[0].forward() - self.operands[1].forward()
-    def _backward(self):
-        self.operands[0].grad += self.grad if self.requires_grad_operands[0] else 0
-        self.operands[1].grad += -self.grad if self.requires_grad_operands[1] else 0
-
-class Maximum(Value):
+        return  (self.operands[1].data * (self.operands[0].data ** (self.operands[1].data - 1))) if self._op_requires_grad[0] else None, \
+                ((self.operands[0].data ** self.operands[1].data) * self.operands[0].data.log()) if self._op_requires_grad[1] else None
+class Maximum(Operator):
     symbol = "max"
     def _forward(self):
-        return max(self.operands[0].forward(), self.operands[1].forward())
+        return max(self.operands[0].data, self.operands[1].data)
     def _backward(self):
-        # derivative is 1 if the operand is the maximum, 0 otherwise
-        max_operand_0 = self.value == self.operands[0].value
-        self.operands[0].grad += self.grad * max_operand_0 if self.requires_grad_operands[0] else 0
-        self.operands[1].grad += self.grad * (not max_operand_0) if self.requires_grad_operands[1] else 0
+        max_op = max(self.operands, key=lambda op: op.data)
+        return  self.operands[0].data.one() if max_op == self.operands[0] else self.operands[0].data.zero() if self._op_requires_grad[0] else None, \
+                self.operands[1].data.one() if max_op == self.operands[1] else self.operands[1].data.zero() if self._op_requires_grad[1] else None
 
 
-# ********* Unary operations *************
-class Neg(Value):
+# ********* Atomic unary operations *************
+
+class Neg(Operator):
     symbol = "-"
     def _forward(self):
-        return -self.operands[0].forward()
+        return -self.operands[0].data
     def _backward(self):
-        self.operands[0].grad += -self.grad if self.requires_grad_operands[0] else 0
-
-class Exp(Value):
+        return -self.operands[0].data.one() if self._op_requires_grad[0] else None
+class Exp(Operator):
     symbol = "exp"
     def _forward(self):
-        return math.exp(self.operands[0].forward())
+        return self.operands[0].data.exp()
     def _backward(self):
-        self.operands[0].grad += self.grad * self.value if self.requires_grad_operands[0] else 0
-
-class Log(Value):
+        return self.data if self._op_requires_grad[0] else None
+class Log(Operator):
     symbol = "log"
     def _forward(self):
-        return math.log(self.operands[0].forward())
+        return self.operands[0].data.log()
     def _backward(self):
-        self.operands[0].grad += self.grad / self.operands[0].value if self.requires_grad_operands[0] else 0
+        return (1.0 / self.operands[0].data) if self._op_requires_grad[0] else None
