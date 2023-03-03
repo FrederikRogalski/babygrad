@@ -1,10 +1,11 @@
+import inspect
 from graphviz import Digraph
 from babygrad.value import Value, Operand, Operator
 
 def graph(net, globs = None):
     d = Digraph()
     seen = set()
-    globs = globs if globs else []
+    globs = globs if globs else inspect.currentframe().f_back.f_locals
     def dfs(net: Operand, d: Digraph):
         if id(net) in seen:
             return
