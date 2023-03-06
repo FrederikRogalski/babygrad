@@ -3,20 +3,10 @@ from abc import ABC, abstractmethod
 #from babygrad.float import FloatData as Data
 from babygrad.data.numpy import NumpyData as Data
 
-class NoGradContext:
-    no_grad: bool = False
-    def __enter__(self):
-        self.no_grad = True
-    def __exit__(self, *args):
-        self.no_grad = False
-    def __bool__(self):
-        return self.no_grad
-
 class Operand(ABC):
     symbol: str
     data: Data
     grad: Data
-    no_grad: NoGradContext = NoGradContext()
     def __init__(self, requires_grad = False):
         self.requires_grad = requires_grad
         # This variable will be set to either True or False for each forward pass depending on whether any of the operands require a gradient
@@ -65,16 +55,10 @@ class Operand(ABC):
                 pass
             case _:
                 operand = Value(data=operand)
-        new_op = Op([operand, self]) if swap else Op([self, operand])
-        if self.no_grad:
-            return Value(new_op._forward())
-        return new_op
+        return Op([operand, self]) if swap else Op([self, operand])
     
     def _unary_op(self, Op):
-        new_op = Op([self])
-        if self.no_grad:
-            return Value(new_op._forward())
-        return new_op
+        return Op([self])
     
     # ****** Atomic operations ********
     def __add__(self, addend):
