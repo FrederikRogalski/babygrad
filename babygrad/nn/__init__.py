@@ -1,8 +1,9 @@
 from babygrad.value import Value
 from abc import ABC, abstractmethod
 
-# Module is the base class for classes that want to implement a neural network module.
+
 class Module(ABC):
+    """Base class for all neural network modules."""
     def __init__(self):
         self.parameters = []
     
@@ -14,6 +15,6 @@ class Module(ABC):
     def forward(self, x):
         pass
 
-class Linear(Module):
-    def __init__(self, in_features, out_features):
-        self.parameters = Value.glorot_uniform
+def glorot_uniform(shape):
+    with Value.no_grad():
+        return Value.uniform(-1, 1, shape) * (6 / Value.sum(shape))**0.5

@@ -47,9 +47,28 @@ class Data(ABC):
         pass
     
     @abstractmethod
+    def exp(self):
+        """Returns the exponential of self."""
+    
+    @abstractmethod
     def zero(self):
         """Returns a 'zero' element of the same type and dimension as self."""
     
     @abstractmethod
     def one(self):
         """Returns a 'one' element of the same type and dimension as self."""
+    
+    @staticmethod
+    @abstractmethod
+    def zeros(shape):
+        """Returns a tensor of zeros of the given shape."""
+    
+    @staticmethod
+    @abstractmethod
+    def ones(shape):
+        """Returns a tensor of ones of the given shape."""
+    
+    @staticmethod
+    @abstractmethod
+    def uniform(low, high, shape):
+        """Returns a uniform random tensor of the given shape."""
