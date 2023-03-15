@@ -12,3 +12,10 @@ class FloatData(float, Data):
         return FloatData(math.exp(self))
     def log(self):
         return FloatData(math.log(self))
+    @property
+    def shape(self):
+        """Shape of the float is always empty"""
+        return ()
+    def permute(self, *dims):
+        """Permute the shape of the float"""
+        return FloatData(self)

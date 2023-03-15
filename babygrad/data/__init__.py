@@ -72,3 +72,8 @@ class Data(ABC):
     @abstractmethod
     def uniform(low, high, shape):
         """Returns a uniform random tensor of the given shape."""
+    
+    
+    
+    def shape(self):
+        """Returns the shape of self."""

@@ -21,3 +21,5 @@ class NumpyData(np.ndarray, Data):
     @staticmethod
     def uniform(low, high, shape):
         return np.random.uniform(low, high, shape)
+    def permute(self, *dims):
+        return self.transpose(*dims)
