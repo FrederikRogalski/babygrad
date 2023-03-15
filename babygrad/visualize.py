@@ -46,7 +46,7 @@ def _label(operand: Operand, operand_to_name: dict[Operand, str]):
     label += f"{operand.symbol}\n"
     trunc = 10
     # truncate data after 4 characters don't use :.4f because we don't know the type.
-    label += f"{str(operand.data)[:trunc]}\n"
+    label += f"{str(operand.data if operand.shape == () else operand.data.shape)[:trunc]}\n"
     label += f"\nGradient:\n{str(operand.grad)[:trunc]}"
     return label
         

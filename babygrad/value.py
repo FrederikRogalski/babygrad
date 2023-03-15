@@ -1,6 +1,6 @@
 from babygrad import log
 from abc import ABC, abstractmethod
-#from babygrad.float import FloatData as Data
+#from babygrad.data.float import FloatData as Data
 from babygrad.data.numpy import NumpyData as Data
 
 class Operand(ABC):
@@ -40,6 +40,11 @@ class Operand(ABC):
     def item(self):
         """Checks if self.data contains a single element and returns it."""
         return self.data.item()
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        """Returns the shape of the data of this node."""
+        return self.data.shape
     
     def __repr__(self):
         return f"{type(self).__name__}({self.data})"
@@ -81,6 +86,16 @@ class Operand(ABC):
         return self._binary_op(minuend, Sub, swap=True)
     def __neg__(self):
         return Neg([self])
+    def permute(self, *dims):
+        # check if dims is a valid permutation of the shape
+        if set(dims) != set(range(len(self.shape))):
+            raise ValueError(f"Permutation {dims} is not valid for shape {self.shape}")
+        return Permute([self], dims=dims)
+    def reshape(self, *shape):
+        # check if shape is valid
+        if sum(self.shape) != sum(shape):
+            raise ValueError(f"Cannot reshape {self.shape} to {shape} because the number of elements is not the same.")
+        return Reshape([self], shape=shape)
     
     def maximum(self, other):
         return self._binary_op(other, Maximum)
@@ -91,12 +106,16 @@ class Operand(ABC):
         return self._unary_op(Log)
     
     # ****** Non atomic operations *******
+    def sqrt(self):
+        return self**0.5
     def sigmoid(self):
         return (1.0 / (1.0 + (-self).exp()))
     def relu(self):
         return self._binary_op(0, Maximum)
     def tanh(self):
         return 2.0 * ((2.0 * self).sigmoid()) - 1.0
+        
+    
 
 
 class Value(Operand):
@@ -179,7 +198,7 @@ class Operator(Operand):
             for operand, operand_gradient in zip(operator.operands, operand_gradients):
                 if operand_gradient is None:
                     continue
-                operand.grad += operand_gradient * self.grad
+                operand.grad += operand_gradient
     
     @abstractmethod
     def _backward(self) -> list[Data | None]:
@@ -198,44 +217,44 @@ class Add(Operator):
     def _forward(self):
         return sum(op.data for op in self.operands)
     def _backward(self):
-        return  self.operands[0].data.one() if self._op_requires_grad[0] else None, \
-                self.operands[1].data.one() if self._op_requires_grad[1] else None
+        return  self.operands[0].data.one() * self.grad if self._op_requires_grad[0] else None, \
+                self.operands[1].data.one() * self.grad if self._op_requires_grad[1] else None
 class Sub(Operator):
     symbol = "-"
     def _forward(self):
         return self.operands[0].data - sum(op.data for op in self.operands[1:])
     def _backward(self):
-        return  self.operands[0].data.one() if self._op_requires_grad[0] else None, \
-                -self.operands[1].data.one() if self._op_requires_grad[1] else None
+        return  self.operands[0].data.one() * self.grad if self._op_requires_grad[0] else None, \
+                -self.operands[1].data.one() * self.grad if self._op_requires_grad[1] else None
 class Mul(Operator):
     symbol = "*"
     def _forward(self):
         return self.operands[0].data * self.operands[1].data
     def _backward(self):
-        return  self.operands[1].data if self._op_requires_grad[0] else None, \
-                self.operands[0].data if self._op_requires_grad[1] else None
+        return  self.operands[1].data * self.grad if self._op_requires_grad[0] else None, \
+                self.operands[0].data * self.grad if self._op_requires_grad[1] else None
 class Div(Operator):
     symbol = "/"
     def _forward(self):
         return self.operands[0].data / self.operands[1].data
     def _backward(self):
-        return  (1.0 / self.operands[1].data) if self._op_requires_grad[0] else None, \
-                -(self.operands[0].data / (self.operands[1].data ** 2)) if self._op_requires_grad[1] else None
+        return  (1.0 / self.operands[1].data) * self.grad if self._op_requires_grad[0] else None, \
+                -(self.operands[0].data / (self.operands[1].data ** 2)) * self.grad if self._op_requires_grad[1] else None
 class Pow(Operator):
     symbol = "**"
     def _forward(self):
         return self.operands[0].data ** self.operands[1].data
     def _backward(self):
-        return  (self.operands[1].data * (self.operands[0].data ** (self.operands[1].data - 1))) if self._op_requires_grad[0] else None, \
-                ((self.operands[0].data ** self.operands[1].data) * self.operands[0].data.log()) if self._op_requires_grad[1] else None
+        return  (self.operands[1].data * (self.operands[0].data ** (self.operands[1].data - 1))) * self.grad if self._op_requires_grad[0] else None, \
+                ((self.operands[0].data ** self.operands[1].data) * self.operands[0].data.log()) * self.grad if self._op_requires_grad[1] else None
 class Maximum(Operator):
     symbol = "max"
     def _forward(self):
         return max(self.operands[0].data, self.operands[1].data)
     def _backward(self):
         max_op = max(self.operands, key=lambda op: op.data)
-        return  self.operands[0].data.one() if max_op == self.operands[0] else self.operands[0].data.zero() if self._op_requires_grad[0] else None, \
-                self.operands[1].data.one() if max_op == self.operands[1] else self.operands[1].data.zero() if self._op_requires_grad[1] else None
+        return  self.operands[0].data.one() if max_op == self.operands[0] else self.operands[0].data.zero() * self.grad if self._op_requires_grad[0] else None, \
+                self.operands[1].data.one() if max_op == self.operands[1] else self.operands[1].data.zero() * self.grad if self._op_requires_grad[1] else None
 
 
 # ********* Atomic unary operations *************
@@ -245,16 +264,39 @@ class Neg(Operator):
     def _forward(self):
         return -self.operands[0].data
     def _backward(self):
-        return -self.operands[0].data.one() if self._op_requires_grad[0] else None,
+        return -self.operands[0].data.one() * self.grad if self._op_requires_grad[0] else None,
 class Exp(Operator):
     symbol = "exp"
     def _forward(self):
         return self.operands[0].data.exp()
     def _backward(self):
-        return self.data if self._op_requires_grad[0] else None,
+        return self.data * self.grad if self._op_requires_grad[0] else None,
 class Log(Operator):
     symbol = "log"
     def _forward(self):
         return self.operands[0].data.log()
     def _backward(self):
-        return (1.0 / self.operands[0].data) if self._op_requires_grad[0] else None,
+        return (1.0 / self.operands[0].data) * self.grad if self._op_requires_grad[0] else None,
+
+
+# ********* Atomic movement operations *************
+class Permute(Operator):
+    symbol = "permute"
+    def __init__(self, operands: list[Operand], dims: tuple[int, ...], **kwargs):
+        self.dims = dims
+        super().__init__(operands, **kwargs)
+    def _forward(self):
+        return self.operands[0].data.permute(*self.dims)
+    def _backward(self):
+        # inverse of permute is permutation with argort of dims as dims
+        return self.grad.permute(*sorted(sorted(self.dims), key=lambda i: self.dims[i])) if self._op_requires_grad[0] else None,
+
+class Reshape(Operator):
+    symbol = "reshape"
+    def __init__(self, operands: list[Operand], shape: tuple[int, ...], **kwargs):
+        self.new_shape = shape
+        super().__init__(operands, **kwargs)
+    def _forward(self):
+        return self.operands[0].data.reshape(self.new_shape)
+    def _backward(self):
+        return self.grad.reshape(self.operands[0].data.shape) if self._op_requires_grad[0] else None,
