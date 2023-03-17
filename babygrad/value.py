@@ -1,8 +1,8 @@
+import math
 from babygrad import log
 from abc import ABC, abstractmethod
 #from babygrad.data.float import FloatData as Data
 from babygrad.data.numpy import NumpyData as Data
-
 class Operand(ABC):
     symbol: str
     data: Data
@@ -60,6 +60,7 @@ class Operand(ABC):
                 pass
             case _:
                 operand = Value(data=operand)
+        #self._check_binary_op(operand)
         return Op([operand, self]) if swap else Op([self, operand])
     
     def _unary_op(self, Op):
@@ -86,16 +87,6 @@ class Operand(ABC):
         return self._binary_op(minuend, Sub, swap=True)
     def __neg__(self):
         return Neg([self])
-    def permute(self, *dims):
-        # check if dims is a valid permutation of the shape
-        if set(dims) != set(range(len(self.shape))):
-            raise ValueError(f"Permutation {dims} is not valid for shape {self.shape}")
-        return Permute([self], dims=dims)
-    def reshape(self, *shape):
-        # check if shape is valid
-        if sum(self.shape) != sum(shape):
-            raise ValueError(f"Cannot reshape {self.shape} to {shape} because the number of elements is not the same.")
-        return Reshape([self], shape=shape)
     
     def maximum(self, other):
         return self._binary_op(other, Maximum)
@@ -104,6 +95,26 @@ class Operand(ABC):
         return self._unary_op(Exp)
     def log(self):
         return self._unary_op(Log)
+
+    def permute(self, *dims: int):
+        self._check_permute(dims)
+        return Permute([self], dims=dims)
+    def reshape(self, *shape: int):
+        self._check_reshape(shape)
+        if shape == self.shape:
+            return self
+        return Reshape([self], shape=shape)
+    
+    def expand(self, *shape):
+        self._check_expand(shape)
+        return Expand([self], shape=shape)
+    def sum(self, *dims: int):
+        dims = tuple(sorted(map(lambda x: x if x >= 0 else len(self.shape) + x, dims)))
+        self._check_sum(dims)
+        if len(dims) == 0:
+            return self
+        return Sum([self], dims=dims)
+    
     
     # ****** Non atomic operations *******
     def sqrt(self):
@@ -114,6 +125,50 @@ class Operand(ABC):
         return self._binary_op(0, Maximum)
     def tanh(self):
         return 2.0 * ((2.0 * self).sigmoid()) - 1.0
+    # matmul
+    def __matmul__(self, other):
+        j = other.shape[1]
+        k = self.shape[0]
+        n = self.shape[1]
+        return (self.reshape(k, 1, n).expand(k, j, n) * other.permute(1,0).reshape(1, j, n).expand(k, j, n)).sum(2).reshape(k, j)
+    
+    # ****** Input checks ********
+    def _check_permute(self, dims):
+        if len(dims) != len(self.shape):
+            raise ValueError(f"Permutation {dims} doesn't match length of {self.shape}.")
+        seen = set()
+        for dim in dims:
+            if dim < 0 or dim >= len(self.shape):
+                raise ValueError(f"Dimension [{dim}] is not valid for shape {self.shape}.")
+            if dim in seen:
+                raise ValueError(f"Dimension [{dim}] is duplicate in {dims}.")
+    def _check_reshape(self, shape):
+        if math.prod(shape) != math.prod(self.shape):
+            raise ValueError(f"Shape {shape} is not valid for shape {self.shape}.")
+    
+    def _check_expand(self, shape):
+        if len(shape) != len(self.shape):
+            raise ValueError(f"Shape {shape} does not have the same length as {self.shape}.")
+        for i in range(len(shape)):
+            if self.shape[i] != 1 and self.shape[i] != shape[i]:
+                raise ValueError(f"Shape {shape} doesn't match {self.shape} at dim [{i}].")
+    def _check_sum(self, dims):
+        seen = set()
+        for dim in dims:
+            if dim < 0 or dim >= len(self.shape):
+                raise ValueError(f"Dimension [{dim}] is not valid for shape {self.shape}.")
+            if dim in seen:
+                raise ValueError(f"Dimension [{dim}] is duplicate in {dims}.")
+    def _check_binary_op(self, operand):
+        if not isinstance(operand, Operand):
+            raise ValueError(f"Operand must be of type Operand, not {type(operand)}.")
+        # TODO: implement broadcasting
+        if len(self.shape) != len(operand.shape):
+            raise ValueError(f"Shapes {self.shape} and {operand.shape} don't match.")
+        for i in range(len(self.shape)):
+            if self.shape[i] != operand.shape[i]:
+                raise ValueError(f"Shapes {self.shape} and {operand.shape} don't match at dim [{i}].")
+        
         
     
 
@@ -136,8 +191,8 @@ class Value(Operand):
     def ones(shape):
         return Value(Data.ones(shape))
     @staticmethod
-    def uniform(shape, low, high):
-        return Value(Data.uniform(shape, low, high))
+    def uniform(low, high, shape):
+        return Value(Data.uniform(low, high, shape))
 
 
 
@@ -286,10 +341,10 @@ class Permute(Operator):
         self.dims = dims
         super().__init__(operands, **kwargs)
     def _forward(self):
-        return self.operands[0].data.permute(*self.dims)
+        return self.operands[0].data.permute(self.dims)
     def _backward(self):
         # inverse of permute is permutation with argort of dims as dims
-        return self.grad.permute(*sorted(sorted(self.dims), key=lambda i: self.dims[i])) if self._op_requires_grad[0] else None,
+        return self.grad.permute(sorted(sorted(self.dims), key=lambda i: self.dims[i])) if self._op_requires_grad[0] else None,
 
 class Reshape(Operator):
     symbol = "reshape"
@@ -300,3 +355,25 @@ class Reshape(Operator):
         return self.operands[0].data.reshape(self.new_shape)
     def _backward(self):
         return self.grad.reshape(self.operands[0].data.shape) if self._op_requires_grad[0] else None,
+
+# ********* Atomic reduction operations *************
+
+class Expand(Operator):
+    symbol = "expand"
+    def __init__(self, operands: list[Operand], shape: tuple[int, ...], **kwargs):
+        self.new_shape = shape
+        super().__init__(operands, **kwargs)
+    def _forward(self):
+        return self.operands[0].data.expand(self.new_shape)
+    def _backward(self):
+        return self.grad.sum(dims=tuple(i for i, s in enumerate(self.operands[0].shape) if s != self.new_shape[i])) if self._op_requires_grad[0] else None,
+
+class Sum(Operator):
+    symbol = "sum"
+    def __init__(self, operands: list[Operand], dims: tuple[int, ...], **kwargs):
+        self.dims = dims
+        super().__init__(operands, **kwargs)
+    def _forward(self):
+        return self.operands[0].data.sum(dims=self.dims)
+    def _backward(self):
+        return self.grad.expand(self.operands[0].shape) if self._op_requires_grad[0] else None,

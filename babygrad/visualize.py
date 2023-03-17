@@ -25,8 +25,11 @@ def graph(operand: Operand, rankdir="RL", bgcolor="#273348", fontcolor="#BBBBBB"
     
     operand_to_name = {}
     for v in variables:
-        if variables[v] in seq:
-            operand_to_name[variables[v]] = v
+        try:
+            if variables[v] in seq:
+                operand_to_name[variables[v]] = v
+        except ValueError:
+            pass
     
     for operand in reversed(seq):
         children = [] if isinstance(operand, Value) else operand.operands
@@ -47,6 +50,6 @@ def _label(operand: Operand, operand_to_name: dict[Operand, str]):
     trunc = 10
     # truncate data after 4 characters don't use :.4f because we don't know the type.
     label += f"{str(operand.data if operand.shape == () else operand.data.shape)[:trunc]}\n"
-    label += f"\nGradient:\n{str(operand.grad)[:trunc]}"
+    label += f"\nGradient:\n{str(operand.grad if operand.grad is None else operand.grad.shape)[:trunc]}"
     return label
         
