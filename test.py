@@ -1,4 +1,4 @@
-from babygrad.value import Value
+from babygrad.tensor import Tensor
 from babygrad.visualize import graph
 
 def f(x):
@@ -7,8 +7,8 @@ def f(x):
 def mse(y, y_hat):
     return (y-y_hat)**2
 
-x = Value(9)
-y = Value(100)
+x = Tensor(9)
+y = Tensor(100)
 
 y_hat = f(x)
 

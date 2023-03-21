@@ -1,6 +1,6 @@
 import inspect
 from graphviz import Digraph
-from babygrad.value import Value, Operand, Operator
+from babygrad.tensor import LazyTensor, Operand, Operator
 
 def _dfs(operand: Operand, visited: set[Operand], seq: list[Operand]):
     if operand in visited:
@@ -17,7 +17,7 @@ def graph(operand: Operand, rankdir="RL", bgcolor="#273348", fontcolor="#BBBBBB"
     d.attr(rankdir=rankdir)
     d.attr(bgcolor=bgcolor)
     variables = inspect.currentframe().f_back.f_locals
-    if isinstance(operand, Value):
+    if isinstance(operand, LazyTensor):
         seq = [operand]
     elif isinstance(operand, Operator):
         _dfs(operand, set(), seq := [])
@@ -32,8 +32,8 @@ def graph(operand: Operand, rankdir="RL", bgcolor="#273348", fontcolor="#BBBBBB"
             pass
     
     for operand in reversed(seq):
-        children = [] if isinstance(operand, Value) else operand.operands
-        _form = "oval" if isinstance(operand, Value) else "box"
+        children = [] if isinstance(operand, LazyTensor) else operand.operands
+        _form = "oval" if isinstance(operand, LazyTensor) else "box"
         _color = requires_grad_color if operand.requires_grad or operand._decendant_requires_grad else color
         _fillcolor = requires_grad_color if operand.requires_grad else color
         _fontcolor = fontcolor

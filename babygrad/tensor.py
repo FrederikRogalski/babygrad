@@ -1,4 +1,5 @@
 import math
+import numpy as np
 from babygrad import log
 from abc import ABC, abstractmethod
 #from babygrad.data.float import FloatData as Data
@@ -9,11 +10,11 @@ class Operand(ABC):
     grad: Data
     def __init__(self, requires_grad = False):
         self.requires_grad = requires_grad
-        # This variable will be set to either True or False for each forward pass depending on whether any of the operands require a gradient
-        # Therefore it indicates an indirect dependency on the gradient of a child node
         self._decendant_requires_grad = None
         self.grad = None
-    
+    def item(self) -> float:
+        """Returns a single element from the data as a python float."""
+        return self.data.item()
     @property
     def data(self):
         return self._data
@@ -21,7 +22,6 @@ class Operand(ABC):
     def data(self, data):
         """Sets the data of this node to the given data."""
         self._data = data if isinstance(data, Data) else Data(data)
-    
     @property
     def grad(self):
         return self._grad
@@ -29,22 +29,11 @@ class Operand(ABC):
     def grad(self, grad):
         """Sets the gradient of this node to the given gradient."""
         self._grad = grad if isinstance(grad, Data) or grad is None else Data(grad)
-    
     def zero_grad(self):
         if self.grad is not None:
             self.grad = self.grad.zero()
-    
     def zero_grads(self):
         """Sets the gradient of this node and all its descendants to None."""
-        
-    def item(self):
-        """Checks if self.data contains a single element and returns it."""
-        return self.data.item()
-
-    @property
-    def shape(self) -> tuple[int, ...]:
-        """Returns the shape of the data of this node."""
-        return self.data.shape
     
     def __repr__(self):
         return f"{type(self).__name__}({self.data})"
@@ -59,7 +48,7 @@ class Operand(ABC):
             case Operand():
                 pass
             case _:
-                operand = Value(data=operand)
+                operand = Tensor(data=operand)
         #self._check_binary_op(operand)
         return Op([operand, self]) if swap else Op([self, operand])
     
@@ -70,20 +59,20 @@ class Operand(ABC):
     def __add__(self, addend):
         return self._binary_op(addend, Add)
     __radd__ = __add__
-    def __mul__(self, multiplicant: 'Value'):
+    def __mul__(self, multiplicant: 'Tensor'):
         return self._binary_op(multiplicant, Mul)
     __rmul__ = __mul__
-    def __truediv__(self, divisor: 'Value'):
+    def __truediv__(self, divisor: 'Tensor'):
         return self._binary_op(divisor, Div)
-    def __rtruediv__(self, dividend: 'Value'):
+    def __rtruediv__(self, dividend: 'Tensor'):
         return self._binary_op(dividend, Div, swap=True)
-    def __pow__(self, exponent: 'Value'):
+    def __pow__(self, exponent: 'Tensor'):
         return self._binary_op(exponent, Pow)
-    def __rpow__(self, base: 'Value'):
+    def __rpow__(self, base: 'Tensor'):
         return self._binary_op(base, Pow, swap=True)
-    def __sub__(self, subtrahend: 'Value'):
+    def __sub__(self, subtrahend: 'Tensor'):
         return self._binary_op(subtrahend, Sub)
-    def __rsub__(self, minuend: 'Value'):
+    def __rsub__(self, minuend: 'Tensor'):
         return self._binary_op(minuend, Sub, swap=True)
     def __neg__(self):
         return Neg([self])
@@ -117,6 +106,8 @@ class Operand(ABC):
     
     
     # ****** Non atomic operations *******
+    # Those are operations that can be composed of atomic operations
+    # TODO: They can be overriden, by specific Data implementations, to be more efficient
     def sqrt(self):
         return self**0.5
     def sigmoid(self):
@@ -125,7 +116,6 @@ class Operand(ABC):
         return self._binary_op(0, Maximum)
     def tanh(self):
         return 2.0 * ((2.0 * self).sigmoid()) - 1.0
-    # matmul
     def __matmul__(self, other):
         j = other.shape[1]
         k = self.shape[0]
@@ -168,32 +158,86 @@ class Operand(ABC):
         for i in range(len(self.shape)):
             if self.shape[i] != operand.shape[i]:
                 raise ValueError(f"Shapes {self.shape} and {operand.shape} don't match at dim [{i}].")
-        
-        
-    
 
-
-class Value(Operand):
-    symbol = "V"
-    def __init__(self, data: Data, requires_grad = False):
+# ************ Lazy tensors ************
+class LazyTensor(Operand):
+    symbol="Lazy"
+    def __init__(self, requires_grad = False):
         super().__init__(requires_grad=requires_grad)
-        self.data = data
+        self._data = None
         self.grad = None
     def __call__(self):
         return self.data
     def zero_grads(self):
         self.zero_grad()
-    
+    @property
+    def data(self):
+        if self._data is None:
+            self.data = self._create()
+        return self._data
+    @data.setter
+    def data(self, value):
+        self._data = value if isinstance(value, Data) else Data(value)
+    @abstractmethod
+    def _create(self) -> Data:
+        pass
+class Tensor(LazyTensor):
+    symbol = "T"
+    def __init__(self, data: Data | list, requires_grad = False):
+        super().__init__(requires_grad=requires_grad)
+        if not hasattr(data, "shape"):
+            self.shape = np.array(data).shape
+        else:
+            self.shape = data.shape
+        self.__data = data
+    def _create(self):
+        return Data(self.__data)
     @staticmethod
     def zeros(shape):
-        return Value(Data.zeros(shape))
+        return Zeros(shape=shape)
     @staticmethod
     def ones(shape):
-        return Value(Data.ones(shape))
+        return Ones(shape)
+    @staticmethod
+    def zeros_like(value):
+        return Tensor.zeros(value.shape)
+    @staticmethod
+    def ones_like(value):
+        return Tensor.ones(value.shape)
     @staticmethod
     def uniform(low, high, shape):
-        return Value(Data.uniform(low, high, shape))
-
+        return Uniform(low, high, shape)
+    @staticmethod
+    def normal(mean, std, shape):
+        return Normal(mean, std, shape)
+class Zeros(LazyTensor):
+    symbol = "0s"
+    def __init__(self, shape: tuple[int, ...], requires_grad = False):
+        super().__init__(requires_grad=requires_grad)
+        self.shape = shape
+    def _create(self):
+        return Data.zeros(self.shape)
+class Ones(LazyTensor):
+    symbol = "1s"
+    def __init__(self, shape: tuple[int, ...], requires_grad = False):
+        super().__init__(requires_grad=requires_grad)
+        self.shape = shape
+    def _create(self):
+        return Data.ones(self.shape)
+class Uniform(LazyTensor):
+    symbol = "Uniform"
+    def __init__(self, low: float, high: float, shape: tuple[int, ...], requires_grad = False):
+        super().__init__(requires_grad=requires_grad)
+        self.low, self.high, self.shape = low, high, shape
+    def _create(self):
+        return Data.uniform(self.shape) * (self.high - self.low) + self.low
+class Normal(LazyTensor):
+    symbol = "Normal"
+    def __init__(self, mean: float, std: float, shape: tuple[int, ...], requires_grad = False):
+        super().__init__(requires_grad=requires_grad)
+        self.mean, self.std, self.shape = mean, std, shape
+    def _create(self):
+        return Data.normal(self.shape) * self.std + self.mean
 
 
 class Operator(Operand):
@@ -244,7 +288,7 @@ class Operator(Operand):
     def backward(self):
         if self._topo_sorted_graph is None:
             self.__call__(compute_data=False)
-        self.grad = self.data.one()
+        self.grad = self.data.ones_like(self.data)
         # Compute gradients in reverse topo sort order
         for operator in reversed(self._topo_sorted_graph):
             log.debug(f"Backward pass of {operator} ({operator.grad=})")
@@ -267,42 +311,47 @@ class Operator(Operand):
 
 # ********* Atomic binary operations *************
 
-class Add(Operator):
+class ShapePreservingOperator(Operator):
+    def __init__(self, operands: list[Operand], requires_grad = False):
+        super().__init__(operands, requires_grad=requires_grad)
+        self.shape = operands[0].shape
+
+class Add(ShapePreservingOperator):
     symbol = "+"
     def _forward(self):
         return sum(op.data for op in self.operands)
     def _backward(self):
         return  self.operands[0].data.one() * self.grad if self._op_requires_grad[0] else None, \
                 self.operands[1].data.one() * self.grad if self._op_requires_grad[1] else None
-class Sub(Operator):
+class Sub(ShapePreservingOperator):
     symbol = "-"
     def _forward(self):
         return self.operands[0].data - sum(op.data for op in self.operands[1:])
     def _backward(self):
         return  self.operands[0].data.one() * self.grad if self._op_requires_grad[0] else None, \
                 -self.operands[1].data.one() * self.grad if self._op_requires_grad[1] else None
-class Mul(Operator):
+class Mul(ShapePreservingOperator):
     symbol = "*"
     def _forward(self):
         return self.operands[0].data * self.operands[1].data
     def _backward(self):
         return  self.operands[1].data * self.grad if self._op_requires_grad[0] else None, \
                 self.operands[0].data * self.grad if self._op_requires_grad[1] else None
-class Div(Operator):
+class Div(ShapePreservingOperator):
     symbol = "/"
     def _forward(self):
         return self.operands[0].data / self.operands[1].data
     def _backward(self):
         return  (1.0 / self.operands[1].data) * self.grad if self._op_requires_grad[0] else None, \
                 -(self.operands[0].data / (self.operands[1].data ** 2)) * self.grad if self._op_requires_grad[1] else None
-class Pow(Operator):
+class Pow(ShapePreservingOperator):
     symbol = "**"
     def _forward(self):
         return self.operands[0].data ** self.operands[1].data
     def _backward(self):
         return  (self.operands[1].data * (self.operands[0].data ** (self.operands[1].data - 1))) * self.grad if self._op_requires_grad[0] else None, \
                 ((self.operands[0].data ** self.operands[1].data) * self.operands[0].data.log()) * self.grad if self._op_requires_grad[1] else None
-class Maximum(Operator):
+class Maximum(ShapePreservingOperator):
     symbol = "max"
     def _forward(self):
         return max(self.operands[0].data, self.operands[1].data)
@@ -314,19 +363,19 @@ class Maximum(Operator):
 
 # ********* Atomic unary operations *************
 
-class Neg(Operator):
+class Neg(ShapePreservingOperator):
     symbol = "-"
     def _forward(self):
         return -self.operands[0].data
     def _backward(self):
         return -self.operands[0].data.one() * self.grad if self._op_requires_grad[0] else None,
-class Exp(Operator):
+class Exp(ShapePreservingOperator):
     symbol = "exp"
     def _forward(self):
         return self.operands[0].data.exp()
     def _backward(self):
         return self.data * self.grad if self._op_requires_grad[0] else None,
-class Log(Operator):
+class Log(ShapePreservingOperator):
     symbol = "log"
     def _forward(self):
         return self.operands[0].data.log()
@@ -339,39 +388,41 @@ class Permute(Operator):
     symbol = "permute"
     def __init__(self, operands: list[Operand], dims: tuple[int, ...], **kwargs):
         self.dims = dims
+        self.shape = tuple(operands[0].shape[d] for d in dims)
         super().__init__(operands, **kwargs)
     def _forward(self):
         return self.operands[0].data.permute(self.dims)
     def _backward(self):
-        # inverse of permute is permutation with argort of dims as dims
+        # inverse of permute is permutation with argsort of dims as dims
         return self.grad.permute(sorted(sorted(self.dims), key=lambda i: self.dims[i])) if self._op_requires_grad[0] else None,
 
 class Reshape(Operator):
     symbol = "reshape"
     def __init__(self, operands: list[Operand], shape: tuple[int, ...], **kwargs):
-        self.new_shape = shape
+        self.shape = shape
         super().__init__(operands, **kwargs)
     def _forward(self):
-        return self.operands[0].data.reshape(self.new_shape)
+        return self.operands[0].data.reshape(self.shape)
     def _backward(self):
-        return self.grad.reshape(self.operands[0].data.shape) if self._op_requires_grad[0] else None,
+        return self.grad.reshape(self.operands[0].shape) if self._op_requires_grad[0] else None,
 
 # ********* Atomic reduction operations *************
 
 class Expand(Operator):
     symbol = "expand"
     def __init__(self, operands: list[Operand], shape: tuple[int, ...], **kwargs):
-        self.new_shape = shape
+        self.shape = shape
         super().__init__(operands, **kwargs)
     def _forward(self):
-        return self.operands[0].data.expand(self.new_shape)
+        return self.operands[0].data.expand(self.shape)
     def _backward(self):
-        return self.grad.sum(dims=tuple(i for i, s in enumerate(self.operands[0].shape) if s != self.new_shape[i])) if self._op_requires_grad[0] else None,
+        return self.grad.sum(dims=tuple(i for i, s in enumerate(self.operands[0].shape) if s != self.shape[i])) if self._op_requires_grad[0] else None,
 
 class Sum(Operator):
     symbol = "sum"
     def __init__(self, operands: list[Operand], dims: tuple[int, ...], **kwargs):
         self.dims = dims
+        self.shape = tuple(s if i not in dims else 1 for i, s in enumerate(operands[0].shape))
         super().__init__(operands, **kwargs)
     def _forward(self):
         return self.operands[0].data.sum(dims=self.dims)

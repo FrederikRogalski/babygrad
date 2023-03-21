@@ -12,15 +12,7 @@ class NumpyData(np.ndarray, Data):
         return np.exp(self).view(NumpyData)
     def log(self):
         return np.log(self).view(NumpyData)
-    @staticmethod
-    def zeros(shape):
-        return np.zeros(shape, dtype=np.float32).view(NumpyData)
-    @staticmethod
-    def ones(shape):
-        return np.ones(shape, dtype=np.float32).view(NumpyData)
-    @staticmethod
-    def uniform(low, high, shape):
-        return np.random.uniform(low, high, shape).view(NumpyData)
+
     def permute(self, dims):
         return np.transpose(super(), axes=dims).view(NumpyData)
     def expand(self, shape):
@@ -29,3 +21,9 @@ class NumpyData(np.ndarray, Data):
         return np.reshape(super(), newshape=shape).view(NumpyData)
     def sum(self, dims):
         return np.sum(super(), axis=dims, keepdims=True).view(NumpyData)
+    @staticmethod
+    def zeros(shape):
+        return np.zeros(shape).view(NumpyData)
+    @staticmethod
+    def ones(shape):
+        return np.ones(shape).view(NumpyData)
