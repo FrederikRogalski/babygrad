@@ -50,6 +50,7 @@ def _label(operand: Operand, operand_to_name: dict[Operand, str]):
     trunc = 10
     # truncate data after 4 characters don't use :.4f because we don't know the type.
     label += f"{str(operand.data if operand.shape == () else operand.data.shape)[:trunc]}\n"
-    label += f"\nGradient:\n{str(operand.grad if operand.grad is None else operand.grad.shape)[:trunc]}"
+    if not operand.grad is None:
+        label += f"\nGradient:\n{str(operand.grad.item() if operand.grad.shape == () else operand.grad.shape)[:trunc]}"
     return label
         
