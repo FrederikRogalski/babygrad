@@ -33,7 +33,7 @@ def graph(operand: Operand, rankdir="RL", bgcolor="#273348", fontcolor="#BBBBBB"
     
     for operand in reversed(seq):
         children = [] if isinstance(operand, LazyTensor) else operand.operands
-        _form = "oval" if isinstance(operand, LazyTensor) else "box"
+        _form = "circle" if isinstance(operand, LazyTensor) else "box"
         _color = requires_grad_color if operand.requires_grad or operand._decendant_requires_grad else color
         _fillcolor = requires_grad_color if operand.requires_grad else color
         _fontcolor = fontcolor
@@ -49,7 +49,10 @@ def _label(operand: Operand, operand_to_name: dict[Operand, str]):
     label += f"{operand.symbol}\n"
     trunc = 10
     # truncate data after 4 characters don't use :.4f because we don't know the type.
-    label += f"{str(operand.data if operand.shape == () else operand.data.shape)[:trunc]}\n"
+    if not operand.data is None and operand.shape == ():
+        label += str(operand.data)[:trunc]
+    else:
+        label += str(operand.shape)
     if not operand.grad is None:
         label += f"\nGradient:\n{str(operand.grad.item() if operand.grad.shape == () else operand.grad.shape)[:trunc]}"
     return label

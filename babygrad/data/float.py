@@ -19,3 +19,14 @@ class FloatData(float, Data):
     def permute(self, *dims):
         """Permute the shape of the float"""
         return FloatData(self)
+    def reshape(self, shape):
+        if shape != ():
+            raise ValueError(f"Cannot reshape float to shape {shape}")
+        return self
+    def permute(self, dims):
+        """Permute the shape of the float"""
+        return self
+    def expand(self, shape):
+        return self
+    def sum(self, dims):
+        return self

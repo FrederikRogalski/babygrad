@@ -7,13 +7,12 @@ def f(x):
 def mse(y, y_hat):
     return (y-y_hat)**2
 
-x = Tensor(9)
+x = Tensor(9, requires_grad=True)
 y = Tensor(100)
 
 y_hat = f(x)
 
 loss = mse(y, y_hat)
-loss.forward()
 loss.backward()
 
-graph(loss, globs = globals()).render("out/test", view=True, format="png")
+graph(loss).render("out/test", view=True, format="png")

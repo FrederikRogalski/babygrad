@@ -1,4 +1,5 @@
 import math
+import logging
 import numpy as np
 from babygrad import log
 from abc import ABC, abstractmethod
@@ -16,13 +17,6 @@ class Operand(ABC):
         """Returns a single element from the data as a python float."""
         return self.data.item()
     @property
-    def data(self):
-        return self._data
-    @data.setter
-    def data(self, data):
-        """Sets the data of this node to the given data."""
-        self._data = data if isinstance(data, Data) else Data(data)
-    @property
     def grad(self):
         return self._grad
     @grad.setter
@@ -36,14 +30,21 @@ class Operand(ABC):
         """Sets the gradient of this node and all its descendants to None."""
     
     def __repr__(self):
+        # Note calling repr on self.data can be expensive if self.data is not computed yet.
+        # repr has side effects, therefore you should avoid calling it but call str instead.
+        if self.data is None:
+            self.__call__()
         return f"{type(self).__name__}({self.data})"
+    def __str__(self):
+        # String will not compute the whole graph. Use it for debugging.
+        return f"{type(self).__name__}({self._data})"
     
     @abstractmethod
     def __call__(self):
         """Computes the whole computation graph and assigns self.data for each node."""
         pass
     
-    def _binary_op(self, operand, Op: 'Operator', swap=False):
+    def _binary_op(self, operand, Op: 'Operator', swap=False) -> 'Operator':
         match operand:
             case Operand():
                 pass
@@ -76,15 +77,12 @@ class Operand(ABC):
         return self._binary_op(minuend, Sub, swap=True)
     def __neg__(self):
         return Neg([self])
-    
     def maximum(self, other):
         return self._binary_op(other, Maximum)
-    
     def exp(self):
         return self._unary_op(Exp)
     def log(self):
         return self._unary_op(Log)
-
     def permute(self, *dims: int):
         self._check_permute(dims)
         return Permute([self], dims=dims)
@@ -93,7 +91,6 @@ class Operand(ABC):
         if shape == self.shape:
             return self
         return Reshape([self], shape=shape)
-    
     def expand(self, *shape):
         self._check_expand(shape)
         return Expand([self], shape=shape)
@@ -103,11 +100,7 @@ class Operand(ABC):
         if len(dims) == 0:
             return self
         return Sum([self], dims=dims)
-    
-    
     # ****** Non atomic operations *******
-    # Those are operations that can be composed of atomic operations
-    # TODO: They can be overriden, by specific Data implementations, to be more efficient
     def sqrt(self):
         return self**0.5
     def sigmoid(self):
@@ -117,10 +110,13 @@ class Operand(ABC):
     def tanh(self):
         return 2.0 * ((2.0 * self).sigmoid()) - 1.0
     def __matmul__(self, other):
-        j = other.shape[1]
-        k = self.shape[0]
-        n = self.shape[1]
+        j = other.shape[-1]
+        k = self.shape[-2]
+        n = self.shape[-1]
         return (self.reshape(k, 1, n).expand(k, j, n) * other.permute(1,0).reshape(1, j, n).expand(k, j, n)).sum(2).reshape(k, j)
+    @property
+    def T(self):
+        return self.permute(1, 0)
     
     # ****** Input checks ********
     def _check_permute(self, dims):
@@ -193,23 +189,23 @@ class Tensor(LazyTensor):
     def _create(self):
         return Data(self.__data)
     @staticmethod
-    def zeros(shape):
-        return Zeros(shape=shape)
+    def zeros(shape, requires_grad = False):
+        return Zeros(shape, requires_grad=requires_grad)
     @staticmethod
-    def ones(shape):
-        return Ones(shape)
+    def ones(shape, requires_grad = False):
+        return Ones(shape, requires_grad=requires_grad)
     @staticmethod
-    def zeros_like(value):
-        return Tensor.zeros(value.shape)
+    def zeros_like(value, requires_grad = False):
+        return Tensor.zeros(value.shape, requires_grad=requires_grad)
     @staticmethod
-    def ones_like(value):
-        return Tensor.ones(value.shape)
+    def ones_like(value, requires_grad = False):
+        return Tensor.ones(value.shape, requires_grad=requires_grad)
     @staticmethod
-    def uniform(low, high, shape):
-        return Uniform(low, high, shape)
+    def uniform(low, high, shape, requires_grad = False):
+        return Uniform(low, high, shape, requires_grad=requires_grad)
     @staticmethod
-    def normal(mean, std, shape):
-        return Normal(mean, std, shape)
+    def normal(mean, std, shape, requires_grad = False):
+        return Normal(mean, std, shape, requires_grad=requires_grad)
 class Zeros(LazyTensor):
     symbol = "0s"
     def __init__(self, shape: tuple[int, ...], requires_grad = False):
@@ -246,9 +242,15 @@ class Operator(Operand):
         super().__init__(requires_grad=requires_grad)
         self._topo_sorted_graph = None
         self.operands = operands
-        self.data = self._forward()
+        self.data = None
         self.grad = None
-    
+    @property
+    def data(self):
+        return self._data
+    @data.setter
+    def data(self, data):
+        """Sets the data of this node to the given data."""
+        self._data = data if data is None else data if isinstance(data, Data) else Data(data)
     @classmethod
     def _dfs(cls, current: Operand, visited: set[Operand], seq: list['Operator']):
         if current in visited:
@@ -259,9 +261,9 @@ class Operator(Operand):
                 cls._dfs(op, visited, seq)
             seq.append(current)
     
-    def __call__(self, compute_data=True):
+    def __call__(self):
         """Forward pass of the computation graph."""
-        log.debug(f"Forward pass of {self} ({compute_data=})")
+        log.debug(f"{self} forward pass")
         # create a topo sort of the computation graph
         self._topo_sorted_graph: list[Operator] = []
         self._dfs(self, set(), self._topo_sorted_graph)
@@ -270,24 +272,25 @@ class Operator(Operand):
             log.debug(f"Forwarding {operator}")
             operator._op_requires_grad = []
             for operand in operator.operands:
-                log.debug(f"Operand {operand}({operand.requires_grad=}, {operand._decendant_requires_grad=})")
                 oprg = operand.requires_grad or operand._decendant_requires_grad
                 operator._op_requires_grad.append(oprg)
                 if oprg and operand.grad is None:
-                    # create the gradient if it does not exist yet
                     operand.grad = operand.data.zero()
             operator._decendant_requires_grad = any(operator._op_requires_grad)
-            log.debug(f"Operands of {operator} require grad: {operator._op_requires_grad}. Therefore {operator} requires grad: {operator._decendant_requires_grad}.")
-            if compute_data:
-                operator.data = operator._forward()
+            if operator._decendant_requires_grad:
+                # nicely formatted log message that reads like that: Operator requires grad because of operands <name> and <name>
+                if operator._decendant_requires_grad:
+                    log.debug(f"{operator} requires grad because of operands {', '.join([str(operand) for operand, oprg in zip(operator.operands, operator._op_requires_grad) if oprg])}")
+                else:
+                    log.debug(f"{operator} does not require grad")
+            operator.data = operator._forward()
     
     @abstractmethod
     def _forward(self) -> Data:
         """Computes only this node of the computation graph."""
     
     def backward(self):
-        if self._topo_sorted_graph is None:
-            self.__call__(compute_data=False)
+        self.__call__()
         self.grad = self.data.ones_like(self.data)
         # Compute gradients in reverse topo sort order
         for operator in reversed(self._topo_sorted_graph):
@@ -354,11 +357,11 @@ class Pow(ShapePreservingOperator):
 class Maximum(ShapePreservingOperator):
     symbol = "max"
     def _forward(self):
-        return max(self.operands[0].data, self.operands[1].data)
+        self.mask = self.operands[0].data > self.operands[1].data
+        return self.operands[0].data * self.mask + self.operands[1].data * (1 - self.mask)
     def _backward(self):
-        max_op = max(self.operands, key=lambda op: op.data)
-        return  self.operands[0].data.one() if max_op == self.operands[0] else self.operands[0].data.zero() * self.grad if self._op_requires_grad[0] else None, \
-                self.operands[1].data.one() if max_op == self.operands[1] else self.operands[1].data.zero() * self.grad if self._op_requires_grad[1] else None
+        return  self.mask * self.grad if self._op_requires_grad[0] else None, \
+                (1 - self.mask) * self.grad if self._op_requires_grad[1] else None
 
 
 # ********* Atomic unary operations *************

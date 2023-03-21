@@ -4,6 +4,10 @@ from babygrad.data import Data
 class NumpyData(np.ndarray, Data):
     def __new__(cls, data):
         return np.array(data, dtype=np.float32).view(cls)
+    def __gt__(self, other):
+        return np.greater(super(), other).astype(np.float32).view(NumpyData)
+    def __lt__(self, other):
+        return np.less(super(), other).astype(np.float32).view(NumpyData)
     def zero(self):
         return np.zeros_like(self).view(NumpyData)
     def one(self):
@@ -12,7 +16,6 @@ class NumpyData(np.ndarray, Data):
         return np.exp(self).view(NumpyData)
     def log(self):
         return np.log(self).view(NumpyData)
-
     def permute(self, dims):
         return np.transpose(super(), axes=dims).view(NumpyData)
     def expand(self, shape):
@@ -21,6 +24,8 @@ class NumpyData(np.ndarray, Data):
         return np.reshape(super(), newshape=shape).view(NumpyData)
     def sum(self, dims):
         return np.sum(super(), axis=dims, keepdims=True).view(NumpyData)
+    def max(self, dims):
+        return np.max(super(), axis=dims, keepdims=True).view(NumpyData)
     @staticmethod
     def zeros(shape):
         return np.zeros(shape).view(NumpyData)

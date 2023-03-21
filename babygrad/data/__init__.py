@@ -66,6 +66,8 @@ class Data(ABC):
         """Returns a reshaped data instance."""
     def sum(self, dims):
         """Returns the sum of self along the given dimensions."""
+    def max(self, dims):
+        """Returns the max of self along the given dimensions."""
         
 # ********** None atmoic operations **********
     
@@ -77,11 +79,11 @@ class Data(ABC):
         return self.ones_like(self)
     @classmethod
     def zeros(cls, shape):
-        """Returns a tensor of zeros of the given tpye and shape"""
+        """Returns a tensor of zeros of the given type and shape"""
         return cls(0).reshape(shape=tuple(1 for _ in shape)).expand(shape=shape)
     @classmethod
     def ones(cls, shape):
-        """Returns a tensor of ones of the given tpye and shape"""
+        """Returns a tensor of ones of the given type and shape"""
         return cls(1).reshape(shape=tuple(1 for _ in shape)).expand(shape=shape)
     @classmethod
     def zeros_like(cls, data):
@@ -92,10 +94,10 @@ class Data(ABC):
         """Returns a Tensor of ones of the same type and shape as data."""
         return cls.ones(data.shape)
     @classmethod
-    def uniform(cls, shape):
-        """Returns a uniform random tensor of the given shape. With values between and including 0 and 1."""
-        return cls(np.random.uniform(0, 1, shape))
+    def uniform(cls, low, high, shape):
+        """Returns a uniform random tensor of the given shape. With values between and including low and high."""
+        return cls(np.random.uniform(low, high, shape))
     @classmethod
-    def normal(cls, shape):
-        """Returns a normal random tensor of the given shape. With mean 0 and standard deviation 1."""
-        return cls(np.random.normal(0, 1, shape))
+    def normal(cls, mean, std, shape):
+        """Returns a normal random tensor of the given shape, mean and standard deviation."""
+        return cls(np.random.normal(mean, std, shape))
