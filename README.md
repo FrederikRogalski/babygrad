@@ -25,4 +25,4 @@ graph(loss).render("out/test", view=True, format="png")
 ```
 
 <!-- Outputs the following picture -->
-![test](out/test.png)
+![test](https://user-images.githubusercontent.com/31591562/226619448-62a2d7cf-4696-403e-8ed5-d001d7a222f5.png)
